@@ -8,20 +8,43 @@ msg() {
 
 # -----------------------
 
-. build-config
+CROSS_COMPILE=$ARM_EABI_TOOLCHAIN/arm-eabi-
 
-TOOLS_DIR=`dirname "$0"`
-MAKE=$TOOLS_DIR/make.sh
+LOCAL_BUILD_DIR=$OUT
+
+TARGET_DIR=$OUT
+
+SYSTEM_PARTITION=$(grep -r "/system" $ANDROID_BUILD_TOP/$TARGET_RECOVERY_FSTAB | sed 's\/system.*\\' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+DEFCONFIG=$TARGET_KERNEL_CONFIG
+
+FLASH_BOOT=$(grep -r "/boot" $ANDROID_BUILD_TOP/$TARGET_RECOVERY_FSTAB | sed 's\/boot.*\\' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+PHONE="$PRODUCT_MANUFACTURER $PRODUCT_MODEL"
+
+DATE=$(date +%Y-%m-%d)
+
+# ----
+
+VERSION=$TARGET_PRODUCT-kernel-$DATE
+
+# ----
+
+BANNER=`cat <<EOF
+ui_print("$VERSION");
+ui_print("for");
+ui_print("$PHONE");
+EOF`
+
+TOOLS_DIR=$TARGET_KERNEL_SOURCE
 
 # -----------------------
 
-ZIP=$TARGET_DIR/update-$VERSION.zip
-SHA1=$TOOLS_DIR/sha1.sh
+ZIP=$TARGET_DIR/$VERSION.zip
 UPDATE_ROOT=$LOCAL_BUILD_DIR/update
-KEYS=$LOCAL_BUILD_DIR/keys
-CERT=$KEYS/certificate.pem
-KEY=$KEYS/key.pk8
-ANYKERNEL=$LOCAL_BUILD_DIR/kernel
+KEYS=$ANDROID_BUILD_TOP/build/target/product/security
+CERT=$KEYS/testkey.x509.pem
+KEY=$KEYS/testkey.pk8
 GLOBAL=$LOCAL_BUILD_DIR/global
 POSTBOOT=$LOCAL_BUILD_DIR/postboot
 VIDEOFIX=$LOCAL_BUILD_DIR/videofix
@@ -43,7 +66,7 @@ else
     msg Regenerating keys, pleae enter the required information.
 
     (
-	mkdir -p $KEYS
+	#mkdir -p $KEYS
 	cd $KEYS
 	openssl genrsa -out key.pem 1024 && \
 	openssl req -new -key key.pem -out request.pem && \
@@ -62,24 +85,40 @@ then
     rm -f $LOCAL_BUILD_DIR/update.zip
 fi
 
-$MAKE $DEFCONFIG
+cd $TOOLS_DIR
+
+if [ ! -e $LOCAL_BUILD_DIR/kernel ]
+then
+make $DEFCONFIG
 
 perl -pi -e 's/(CONFIG_LOCALVERSION="[^"]*)/\1-'"$VERSION"'"/' .config
 
-$MAKE -j$N_CORES
+make -j$(cat /proc/cpuinfo | grep "^processor" | wc -l) ARCH=arm CROSS_COMPILE="$CROSS_COMPILE"
 
 msg Kernel built successfully, building $ZIP
+else
+msg Using pre-built kernel, building $ZIP
+fi
 
 mkdir -p $UPDATE_ROOT/system/lib/modules
+
+if [ ! -e $LOCAL_BUILD_DIR/kernel ]
+then
 find . -name '*.ko' -exec cp {} $UPDATE_ROOT/system/lib/modules/ \;
+else
+cp $OUT/system/lib/modules/* $UPDATE_ROOT/system/lib/modules/*
+fi
 
 mkdir -p $UPDATE_ROOT/META-INF/com/google/android
-cp $TOOLS_DIR/update-binary $UPDATE_ROOT/META-INF/com/google/android
+cp ./update-binary $UPDATE_ROOT/META-INF/com/google/android
 
-$SHA1
-
+if [ ! -e $LOCAL_BUILD_DIR/kernel ]
+then
 SUM=`sha1sum $ZIMAGE | cut --delimiter=' ' -f 1`
- 
+else
+SUM=`sha1sum $LOCAL_BUILD_DIR/kernel | cut --delimiter=' ' -f 1`
+fi
+
 (
     cat <<EOF
 $BANNER
@@ -87,24 +126,28 @@ EOF
   sed -e "s|@@SYSTEM_PARTITION@@|$SYSTEM_PARTITION|" \
       -e "s|@@FLASH_BOOT@@|$FLASH_BOOT|" \
       -e "s|@@SUM@@|$SUM|" \
-      < $TOOLS_DIR/updater-script
+      < ./updater-script
 ) > $UPDATE_ROOT/META-INF/com/google/android/updater-script
 
-
-cp $ZIMAGE $ANYKERNEL
 mkdir -p $UPDATE_ROOT/kernel
-mkdir -p $UPDATE_ROOT/global
-mkdir -p $UPDATE_ROOT/postboot
-mkdir -p $UPDATE_ROOT/videofix
-cp $ANYKERNEL/* $UPDATE_ROOT/kernel
-cp $GLOBAL/* $UPDATE_ROOT/global
-cp $POSTBOOT/* $UPDATE_ROOT/postboot
-cp $VIDEOFIX/* $UPDATE_ROOT/videofix
+if [ -e $LOCAL_BUILD_DIR/kernel ]
+then
+cp $LOCAL_BUILD_DIR/kernel $UPDATE_ROOT/kernel/zImage
+else
+cp ./$ZIMAGE $UPDATE_ROOT/kernel
+fi
+cp ./AnyKernel/* $UPDATE_ROOT/kernel
 
 (
     cd $UPDATE_ROOT
     zip -r ../update.zip .
 )
-java -jar $TOOLS_DIR/signapk.jar $CERT $KEY $LOCAL_BUILD_DIR/update.zip $ZIP
-
+java -jar ./signapk.jar $CERT $KEY $LOCAL_BUILD_DIR/update.zip $ZIP
+if [ ! -e $LOCAL_BUILD_DIR/kernel ]
+then
+make mrproper
+fi
+rm -rf $UPDATE_ROOT
+rm -f $LOCAL_BUILD_DIR/update.zip
 msg COMPLETE
+cd $ANDROID_BUILD_TOP
