@@ -57,7 +57,7 @@
 
 // PMEM SMI
 #define MSM_SMI_SIZE 0x4000000
-#define KERNEL_SMI_SIZE 0x700000
+#define KERNEL_SMI_SIZE 0xE00000 /* 14MB */
 #define USER_SMI_SIZE (MSM_SMI_SIZE - KERNEL_SMI_SIZE)
 #define MSM_PMEM_SMIPOOL_SIZE USER_SMI_SIZE
 
@@ -92,7 +92,7 @@
 /* 0x42A00000~0x48800000 is 94MB Reserved for something */
 /* 0x48800000~0x7CC00000 is 836MB for APP */
 /* 0x7CC00000~0x80000000 is 52MB for ADSP PMEM */
-#define SIZE_ADDR1	  0x2FA00000
+#define SIZE_ADDR1	  0x2F261568 /* 754MB */
 /*** END Memory map ***/
 
 /* GPIO definition */
